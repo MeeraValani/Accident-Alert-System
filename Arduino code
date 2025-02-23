@@ -1,1 +1,83 @@
+#include <SoftwareSerial.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include <TinyGPS++.h>
 
+// Define modules
+SoftwareSerial gpsSerial(4, 3);  // GPS TX -> 4, RX -> 3
+SoftwareSerial sim800l(7, 6);    // GSM TX -> 7, RX -> 6
+TinyGPSPlus gps;
+LiquidCrystal_I2C lcd(0x27, 16, 2);  // Change 0x27 if LCD address differs
+
+// Pin assignments
+const int buzzer = 8;
+const int button = 9;
+const int xPin = A1, yPin = A2, zPin = A3;  // ADXL335 pins
+
+// Crash detection threshold
+const int crashThreshold = 300;  
+
+bool crashDetected = false;
+
+void setup() {
+    Serial.begin(9600);
+    gpsSerial.begin(9600);
+    sim800l.begin(9600);
+
+    pinMode(buzzer, OUTPUT);
+    pinMode(button, INPUT_PULLUP);
+
+    lcd.init();
+    lcd.backlight();
+    lcd.setCursor(0, 0);
+    lcd.print("Crash Detected");
+    delay(2000);
+    lcd.clear();
+
+    // Initialize GSM module
+    initGSM();
+}
+
+void loop() {
+    float xVal = analogRead(xPin);
+    float yVal = analogRead(yPin);
+    float zVal = analogRead(zPin);
+    
+    float magnitude = sqrt(xVal * xVal + yVal * yVal + zVal * zVal);
+
+    // Read GPS data
+    while (gpsSerial.available()) {
+        gps.encode(gpsSerial.read());
+    }
+
+    if (magnitude > crashThreshold && !crashDetected) {
+        crashDetected = true;
+        Serial.println("Crash Detected!");
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("Crash Detected!");
+
+        // Check if GPS data is valid
+        if (gps.location.isValid()) {
+            float latitude = gps.location.lat();
+            float longitude = gps.location.lng();
+
+            lcd.setCursor(0, 1);
+            lcd.print("Lat: "); lcd.print(latitude, 6);
+            lcd.setCursor(0, 1);
+            lcd.print("Lon: "); lcd.print(longitude, 6);
+
+            // Activate buzzer
+            digitalWrite(buzzer, HIGH);
+
+            // Send alert
+            sendEmergencyMessage(latitude, longitude);
+            makeEmergencyCall();
+        } else {
+            lcd.setCursor(0, 1);
+            lcd.print("No GPS Fix!");
+            Serial.println("GPS fix not available!");
+        }
+    }
+}
+}
